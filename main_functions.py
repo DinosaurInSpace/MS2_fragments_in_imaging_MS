@@ -31,8 +31,13 @@ Future:
 1. Future: HMDB spectra, lipid spectra (lipidblast?) simulated from somewhere
 2. Score colocalization
 3. Extract Mona negative hits
-4. Implement more adducts in sirius input.  Currently [M+, M+H, M+Na, M+K], M-H, M-
+4. Implement more adducts in sirius input.  Currently [M+, M+H, M+Na, M+K] next: M-H, M-
 5. Are smiles search and inchi search close enough?
+6. Search by name
+8. Rescue GNPS in silico lipids from PNNL:
+    the library membership is
+    PNNL-LIPIDS-POSITIVE
+    PNNL-LIPIDS-NEGATIVE
 
 Usage:
 
@@ -58,6 +63,7 @@ import glob
 import os
 import json
 import mona
+import subprocess
 
 # RDKit
 import rdkit
@@ -396,6 +402,61 @@ def adduct_translate(add):
     return m_s_dict[add]
 
 
+def exists(ms_path):
+    if os.path.isfile(ms_path):
+        return 1
+    else:
+        return 0
+
+
+def loop_Sirius(df, Mona_hits_df, GNPS_hits_df):
+    # Main loop for running Sirius
+    # Have to delete old spectra and trees before rerunning
+    sirius_output_dict = {}
+    mona_df = Mona_hits_df[['inchi', 'adduct', 'spectrum']].copy(deep=True)
+    gnps_df = GNPS_hits_df[['can_smiles', 'Adduct', 'peaks_json']].copy(deep=True)
+
+    # If positive mode
+    current_adducts = ['M+', 'M+H', 'M+Na', 'M+K']
+    mona_df = mona_df[mona_df.adduct.isin(current_adducts)]
+    gnps_df = gnps_df[gnps_df.Adduct.isin(current_adducts)]
+
+    # Loops over dataframe
+    index_list = list(df.index)
+    for idx in index_list:
+        print('\n', idx)
+        ser = df.loc[idx]
+        formula = ser.formula
+        inchi = ser.inchi
+        can_smiles = ser.can_smiles
+        db_index = ser.db_index
+        mo_df = mona_df[mona_df.inchi == inchi]
+        gn_df = gnps_df[gnps_df.can_smiles == can_smiles]
+        unique_adducts = list(set(list(mo_df.adduct) + list(gn_df.Adduct)))
+        print(unique_adducts)
+        add_counter = 0
+        for add in unique_adducts:
+            print(idx, ' ', add)
+            add_counter += 1
+            output_dir = '/Users/dis/PycharmProjects/word2vec/trees/' + db_index
+            m_df = mo_df[mo_df.adduct == add]
+            g_df = gn_df[gn_df.Adduct == add]
+            spectra_list = ms_format_writer(m_df, g_df, db_index, add)
+            t_add = adduct_translate(add)
+            sirius_input = runner_Sirius(formula, t_add, spectra_list, output_dir, db_index)
+            # In Jupyter it was: "sirius_output = !{sirius_input}"
+            sirius_output = subprocess.check_output([sirius_input])
+            sirius_output_dict[db_index] = output_Sirius_parser(sirius_output, output_dir,
+                                                                db_index, add_counter)
+
+    sirius_output_df = pd.DataFrame.from_dict(sirius_output_dict, orient='index', columns=['file'])
+    sirius_output_df['exists'] = sirius_output_df['file'].apply(lambda x: exists(x))
+    print('Sirius success: ', sirius_output_df.exists.value_counts())
+    sirius_output_df = sirius_output_df[sirius_output_df.exists == 1]
+
+    return sirius_output_df
+
+
 def runner_Sirius(formula, ion, spectra_list, output_dir, db_index):
     # Generates query for Sirius and runs on command line.
     binary = '/Users/dis/PycharmProjects/word2vec/sirius/bin/sirius'
@@ -439,35 +500,201 @@ def output_Sirius_parser(sirius_output, output_dir, db_index, n):
         return search_string
 
 
-def exact_mass_calculator(formula, charge, adduct):
-    pass
-    return
+def ms_pd_reader(ms_path, db_index):
+    df = pd.read_csv(ms_path, sep='\t', header=0)
+    df = df[['exactmass', 'explanation']]
+    df['db_index'] = db_index
+    return df
 
 
-def save_database_msms(path):
-    pass
-    return
+def df_merge(input_df):
+    # Merges MS2 data with metadata and output to
+    # pre-METASPACE df
+    out_df = pd.DataFrame()
+
+    # Loops over dataframe
+    index_list = list(input_df.index)
+    for idx in index_list:
+        ser = input_df.loc[idx]
+        df = ms_pd_reader(ser.file, ser.db_index)
+        out_df = pd.concat([out_df, df])
+
+    out_df = pd.merge(out_df, input_df, how='left', on='db_index')
+    return out_df
 
 
-def load_database_msms(path):
-    pass
-    return
+def ex(formula):
+    if type(formula) is str:
+        return Formula(formula).isotope.mass
+    else:
+        print(formula)
+        return formula
 
 
-def filter_exptl_obs(database_msms, output_exptl_METASPACE):
-    pass
-    return
+def add_A(A, formula, n):
+    # Safely add/subtract elements such as H to molecular formulas
+    # E.g. A = 'H', formula = 'C6H12O6', n = 1
+    x = formula
+    if n == 0:
+        return x
+
+    elif A not in x and n >= 0:
+        prefix = x
+        if n == 1:
+            final_suffix = A
+        else:
+            final_suffix = A + str(n)
+
+    elif A not in x and n < 0:
+        print('Error!')
+        return np.nan
+
+    else:
+        x = x.split(A)
+        prefix = x[0]
+        N_suffix = x[1]
+        if N_suffix == '':
+            if n == -1:
+                final_suffix = ''
+            else:
+                final_suffix = A + str(n + 1)
+        else:
+            ln = len(N_suffix)
+            suffix = N_suffix.lstrip(digits)
+            ls = len(suffix)
+            # print(ln, " ", ls)
+
+            if ln - ls == 0:
+                N = 1
+            elif ln - ls == 1:
+                N = N_suffix[0:1]
+            elif ln - ls == 2:
+                N = N_suffix[0:2]
+            elif ln - ls == 3:
+                N = N_suffix[0:3]
+            else:
+                print('Bad formula!')
+                return
+            # print(N)
+            if int(N) + n == 0:
+                final_suffix = suffix
+            else:
+                final_suffix = A + str(int(N) + n) + suffix
+    return prefix + final_suffix
 
 
-def output_METASPACE(database_msms):
-    pass
-    return
+def ion_form(formula, dmass):
+    # Generates ion formula from formula and dmass
+    # Will need to be updated for new adducts and - mode
+    # print(formula, '\t', type(formula), '\t', dmass)
+
+    if dmass == 0:
+        formula = formula
+    elif dmass == 1:
+        formula = add_A('H', formula, 1)
+    elif dmass == 2:
+        formula = add_A('H', formula, 2)
+    elif dmass == 22:
+        # formula = add_A('H', formula, -1)
+        formula = add_A('Na', formula, 1)
+    elif dmass == 23:
+        formula = add_A('Na', formula, 1)
+    elif dmass == 38:
+        # formula = add_A('H', formula, -1)
+        formula = add_A('K', formula, 1)
+    elif dmass == 39:
+        formula = add_A('K', formula, 1)
+    else:
+        print('dmass not known!')
+        formula = np.nan
+    return formula
+
+
+def ionmasspos(ionformula):
+    return ex(ionformula) - 0.00055
+
+
+def mass_check(em, im):
+    if em - im <= 0.001:
+        return True
+    else:
+        return False
+
+
+def results_clean_up(has_MS2_df, sirius_output_df):
+    # Merges Sirius results and metadata
+    MS2_meta_df = pd.merge(has_MS2_df, sirius_output_df, how='inner',
+                           left_on='db_index', right_index=True)
+
+    # Joins MS2 spectra to metadata
+    pre_METASPACE_df = df_merge(MS2_meta_df)
+    pre_METASPACE_df = pre_METASPACE_df.dropna()
+    pre_METASPACE_df['expl_ex'] = pre_METASPACE_df.explanation.apply(lambda x:
+                                                                     ex(x))
+    pre_METASPACE_df['dmass'] = pre_METASPACE_df['exactmass'] - pre_METASPACE_df['expl_ex']
+    pre_METASPACE_df = pre_METASPACE_df.astype({'dmass': int})
+    pre_METASPACE_df = pre_METASPACE_df[pre_METASPACE_df.dmass >= 0]
+    pre_METASPACE_df[['formula', 'explanation', 'exactmass', 'expl_ex', 'dmass']]
+
+    print('Observed ions: ', pre_METASPACE_df['dmass'].value_counts())
+
+    pre_METASPACE_df = pre_METASPACE_df.dropna()
+    pre_METASPACE_df['H_check'] = pre_METASPACE_df.explanation.str.contains('H')
+    df = pre_METASPACE_df
+    df = df[~((df.dmass == 38) & (df.H_check == False))]
+    df = df[~((df.dmass == 22) & (df.H_check == False))]
+    pre_METASPACE_df = df
+
+    pre_METASPACE_df['ion_formula'] = pre_METASPACE_df.apply(lambda x:
+                                                             ion_form(x.explanation,
+                                                                      x.dmass), axis=1)
+
+    pre_METASPACE_df['bad_if'] = pre_METASPACE_df.ion_formula.str.contains('-')
+    pre_METASPACE_df = pre_METASPACE_df[pre_METASPACE_df.bad_if == False]
+
+    pre_METASPACE_df = pre_METASPACE_df.copy(deep=True)
+    pre_METASPACE_df['ion_mass'] = pre_METASPACE_df.ion_formula.apply(lambda x: ionmasspos(x))
+
+    df = pre_METASPACE_df
+    df['good_mass_calc'] = df.apply(lambda x: mass_check(x.exactmass,
+                                                         x.ion_mass),
+                                    axis=1)
+    pre_METASPACE_df = df
+    print('Correct ionformulas: ', pre_METASPACE_df.good_mass_calc.value_counts())
+    return pre_METASPACE_df
+
+
+def f_or_p_ion(d, p):
+    if d == p:
+        return 'p'
+    else:
+        return 'f'
+
+
+def output_METASPACE(pre_METASPACE_df):
+    # Filters columns, renames, and prepares for export to METASPACE
+
+    df = pre_METASPACE_df[['explanation', 'formula', 'id', 'name',
+                           'ion_formula', 'inchi']].copy(deep=True)
+    df['f_num'] = df.groupby(['name']).cumcount() + 1
+    df['f_or_p'] = df.apply(lambda x: f_or_p_ion(x.explanation,
+                                                 x.formula), axis=1)
+    df['out_id'] = df.id + '_' + df.f_num.astype(str) + df.f_or_p
+    df['out_name'] = df.out_id + '_' + df.name
+    df_prefilter = df[['out_id', 'out_name', 'ion_formula', 'inchi', 'id']]
+    df_prefilter = df_prefilter.rename(columns={'out_id': 'id', 'out_name': 'name',
+                                                'ion_formula': 'formula', 'id': 'old_id'})
+    return df_prefilter
 
 
 def api_upload_db_METASPACE(path, database_msms):
     pass
     return
 
+
+def extract_results_METASPACE(path, database_msms):
+    pass
+    return
 
 
 def main():

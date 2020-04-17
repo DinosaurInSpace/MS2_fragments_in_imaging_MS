@@ -64,11 +64,14 @@ import os
 import json
 import mona
 import subprocess
+from string import digits
 
 # RDKit
 import rdkit
 from rdkit import Chem
 from rdkit.Chem import AllChem
+
+from molmass import Formula
 
 
 __author__ = "Christopher M Baxter Rath"
@@ -130,7 +133,8 @@ def parse_GNPS_json(GNPS_json):
                 ' Negative', ' Positive']
 
     good_cols = ['Compound_Name', 'spectrum_id', 'peaks_json',
-                 'Adduct', 'Smiles', 'INCHI', 'Ion_Mode']
+                 'Adduct', 'Smiles', 'INCHI', 'Ion_Mode',
+                 'library_membership']
 
     GNPS_df.Smiles = GNPS_df.Smiles.replace(['N/A', ' ', 'NA', 'c', 'n/a'], 'x')
     GNPS_df.INCHI = GNPS_df.INCHI.replace(['N/A', ' ', ''], 'x')

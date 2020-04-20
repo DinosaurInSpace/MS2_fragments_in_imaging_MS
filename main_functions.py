@@ -38,6 +38,7 @@ Future:
     the library membership is
     PNNL-LIPIDS-POSITIVE
     PNNL-LIPIDS-NEGATIVE
+    --> Need structures somehow for this!  "Few weeks" Ming
 
 Usage:
 
@@ -65,6 +66,7 @@ import json
 import mona
 import subprocess
 from string import digits
+import re
 
 # RDKit
 import rdkit
@@ -92,6 +94,18 @@ def load_molecule_database(path_to_db):
     else:
         ref_db = ref_db.reset_index(drop=True)
         return ref_db
+
+
+def lipid_name(d):
+    x = d[0]['Compound_Name'].split(' ')[2]
+    return x
+
+
+def formula_writer(df):
+    # Writes formula for PNNL-LIPIDS database from incorrect field
+    df = df.copy(deep=True)
+    df['Formula_smiles'] = df.annotation_history.apply(lambda x: lipid_name(x))
+    return df
 
 
 def parse_GNPS_json(GNPS_json):
@@ -136,19 +150,35 @@ def parse_GNPS_json(GNPS_json):
                  'Adduct', 'Smiles', 'INCHI', 'Ion_Mode',
                  'library_membership']
 
+    rescue_libaries = ['GNPS-EMBL-MCF', 'PNNL-LIPIDS-POSITIVE']
+
+    good_libs = ['GNPS-LIBRARY', 'GNPS-EMBL-MCF',
+             'MMV_POSITIVE', 'MMV_NEGATIVE',
+             'LDB_POSITIVE', 'LDB_NEGATIVE',
+             'GNPS-NIST14-MATCHES', 'GNPS-COLLECTIONS-MISC',
+             'GNPS-MSMLS', 'BILELIB19',
+             'PNNL-LIPIDS-POSITIVE', 'PNNL-LIPIDS-NEGATIVE',
+             'MIADB', 'MASSBANK', 'MASSBANKEU', 'MONA',
+             'RESPECT', 'HMDB', 'CASMI', 'SUMNER']
+
     GNPS_df.Smiles = GNPS_df.Smiles.replace(['N/A', ' ', 'NA', 'c', 'n/a'], 'x')
     GNPS_df.INCHI = GNPS_df.INCHI.replace(['N/A', ' ', ''], 'x')
 
     GNPS_df['temp'] = GNPS_df.Smiles + GNPS_df.INCHI
+    GNPS_df1 = GNPS_df[GNPS_df.temp != 'xx']
+    GNPS_df2 = GNPS_df[GNPS_df.library_membership == 'PNNL-LIPIDS-POSITIVE']
+    GNPS_df2 = formula_writer(GNPS_df2)
+    GNPS_df = pd.concat([GNPS_df1, GNPS_df2])
+
+    # Turn the next line off to include PNNL_lipids without structures.
     GNPS_df = GNPS_df[GNPS_df.temp != 'xx']
 
-    GNPS_df = GNPS_df[(GNPS_df.ms_level == '2') &
-                      (GNPS_df.Instrument.isin(high_res_insts)) &
-                      GNPS_df.Adduct.isin(good_adducts) &
-                      GNPS_df.Ion_Mode.isin(good_pol)
-                      ].copy(deep=True)
+    GNPS_df = GNPS_df[(GNPS_df.ms_level == '2')]
+    GNPS_df = GNPS_df[(GNPS_df.Instrument.isin(high_res_insts))]
+    GNPS_df = GNPS_df[GNPS_df.Adduct.isin(good_adducts)]
+    GNPS_df = GNPS_df[GNPS_df.Ion_Mode.isin(good_pol)]
 
-    GNPS_df.Ion_Mode = GNPS_df.Ion_Mode.replace(['Positive', 'Positive-20eV',
+    GNPS_df['Ion_Mode'] = GNPS_df.Ion_Mode.replace(['Positive', 'Positive-20eV',
                                                  'Positive-10eV', 'Positive-40eV',
                                                  'Positive-0eV', ' Positive'], 'positive')
 
@@ -338,8 +368,74 @@ def parse_MONA_out(Mona_hits_df):
 
     return Mona_hits_df
 
+def tag_finder(head, tail, fh):
+    query = head + '(.*)' + tail
+    result = re.search(query, fh)
+    if result == None:
+        return 'nd'
+    else:
+        return result.group(1)
 
-def preparser_Sirius(ref_db, GNPS_hits_df, Mona_hits_df):
+
+def get_att(fh, head, tail, directory):
+    root_path = directory + '/' + fh
+    with open (root_path, 'r') as file:
+        data = file.read()
+        out = tag_finder(head, tail, data)
+        return out
+
+
+def parse_hmdb(directory, theo_flag=False):
+    # Filters dataset for high mass accuracy instruments and <20 ppm mass error
+    file_paths = os.listdir(directory)
+    hpe_df = pd.DataFrame()
+    hpe_df['file_paths'] = list(sorted(file_paths))
+    hpe_df['id'] = hpe_df.file_paths.apply(lambda x: x.split('_')[0])
+
+    if theo_flag is False:
+        hpe_df['instrument'] = hpe_df.file_paths.apply(lambda x: get_att(x,
+                                                                     '<instrument-type>',
+                                                                     '</instrument-type>',
+                                                                     directory))
+    if theo_flag is True:
+        hpe_df['instrument'] = 'predicted'
+
+    hpe_df['polarity'] = hpe_df.file_paths.apply(lambda x: get_att(x,
+                                                                   '<ionization-mode>',
+                                                                   '</ionization-mode>',
+                                                                   directory))
+
+    good_hmdb_intruments = ['LC-ESI-qTof',
+                            'LC-ESI-ITFT (LTQ Orbitrap XL, Thermo Scientfic)',
+                            'LC-ESI-QTOF (UPLC Q-Tof Premier, Waters)',
+                            'DI-ESI-qTof',
+                            'CE-ESI-TOF (CE-system connected to 6210 Time-of-Flight MS, Agilent)',
+                            'LC-ESI-ITTOF (LCMS-IT-TOF)',
+                            'LC-ESI-qTOF',
+                            'MALDI-TOF (Voyager DE-PRO, Applied Biosystems)',
+                            'LC-ESI-qToF',
+                            'LC-ESI-Hybrid FT',
+                            'LC-ESI-QTOF (ACQUITY UPLC System, Waters)',
+                            'DI-ESI-Q-Exactive Plus',
+                            'LC-ESI-ITTOF (Shimadzu LC20A-IT-TOFMS)',
+                            'LC-ESI-ITFT (LTQ Orbitrap XL Thermo Scientific)',
+                            'predicted'
+                            ]
+
+    hpe_df = hpe_df[hpe_df.polarity == 'Positive']
+    hpe_df = hpe_df[hpe_df.instrument.isin(good_hmdb_intruments)]
+    hpe_df['adduct'] = 'M+H'
+    return hpe_df
+
+
+def hmdb_theo_finder(ref_df, expt_df):
+    # Finds theoretical MS/MS spectra only for files which do not have experimental
+    # data
+    pass
+    return
+
+
+def preparser_Sirius(ref_db, GNPS_hits_df, Mona_hits_df, HMDB_ex, HMDB_theo):
     # Cleans up ref db for only entries with experimental MS/MS spectra
     df = ref_db[['id', 'name', 'formula', 'inchi', 'can_smiles']].copy(deep=True)
     df['temp'] = list(df.index)
@@ -348,18 +444,27 @@ def preparser_Sirius(ref_db, GNPS_hits_df, Mona_hits_df):
     df['db_index'] = df['db_index'].str.replace('[^a-zA-Z0-9_]', '')
     m = list(Mona_hits_df.inchi)
     g = list(GNPS_hits_df.can_smiles)
-    df = df[(df.inchi.isin(m) | df.can_smiles.isin(g))].copy(deep=True)
+    he = list(HMDB_ex.id)
+    ht = list(HMDB_theo.id)
+    df1 = df[(df.inchi.isin(m) |
+              df.can_smiles.isin(g) |
+              df.id.isin(he))].copy(deep=True)
+
+    # Only load predicted MS/MS spectra for samples without experimentaldata
+    expt_ids = list(df1.id)
+    df2 = df[~df.id.isin(expt_ids)]
+    df = pd.concat([df1, df2])
     return df
 
 
-def ms_format_writer(m_df, g_df, db_index, add):
+def ms_format_writer(m_df, g_df, he_df, ht_df, db_index, add):
     # Writes the GNPS json and the Mona text spectra to file, returning paths
     out_path = '/Users/dis/PycharmProjects/word2vec/spectra/'
     spectral_paths = []
     counter = 0
     path = out_path + db_index + '/'
 
-    # Errors if directroy already exists
+    # Errors if directory already exists
     try:
         os.mkdir(path)
     except:
@@ -376,7 +481,6 @@ def ms_format_writer(m_df, g_df, db_index, add):
             spectral_paths.append(o)
             with open(o, 'w+') as out_file:
                 out_file.write(s)
-
     else:
         pass
 
@@ -395,6 +499,21 @@ def ms_format_writer(m_df, g_df, db_index, add):
             spectral_paths.append(o)
             with open(o, 'w+') as out_file:
                 out_file.write(s)
+    else:
+        pass
+
+    if not he_df.empty:
+        # Write function to copy txt files to folder
+        pass
+    else:
+        pass
+
+    if not ht_df.empty:
+        # Write function to copy txt files to folder
+        pass
+    else:
+        pass
+
 
     return spectral_paths
 
@@ -445,6 +564,8 @@ def loop_Sirius(df, Mona_hits_df, GNPS_hits_df):
             output_dir = '/Users/dis/PycharmProjects/word2vec/trees/' + db_index
             m_df = mo_df[mo_df.adduct == add]
             g_df = gn_df[gn_df.Adduct == add]
+            # HMDB_df
+            # HMDB_df
             spectra_list = ms_format_writer(m_df, g_df, db_index, add)
             t_add = adduct_translate(add)
             sirius_input = runner_Sirius(formula, t_add, spectra_list, output_dir, db_index)
@@ -692,12 +813,85 @@ def output_METASPACE(pre_METASPACE_df):
 
 
 def api_upload_db_METASPACE(path, database_msms):
+    # Waiting on development from Vitally
     pass
     return
 
 
-def extract_results_METASPACE(path, database_msms):
-    pass
+def split_data_frame_list(df, target_column):
+    # Accepts a column with multiple types and splits list variables to several rows.
+
+    row_accumulator = []
+
+    def split_list_to_rows(row):
+        split_row = row[target_column]
+
+        if isinstance(split_row, list):
+
+          for s in split_row:
+              new_row = row.to_dict()
+              new_row[target_column] = s
+              row_accumulator.append(new_row)
+
+          if split_row == []:
+              new_row = row.to_dict()
+              new_row[target_column] = None
+              row_accumulator.append(new_row)
+
+        else:
+          new_row = row.to_dict()
+          new_row[target_column] = split_row
+          row_accumulator.append(new_row)
+
+    df.apply(split_list_to_rows, axis=1)
+    new_df = pd.DataFrame(row_accumulator)
+
+    return new_df
+
+
+def a_label(x, a):
+    # Finds string a in string x
+    if a in x:
+        return 1
+    else:
+        return 0
+
+
+def extract_results_METASPACE(ms_out):
+    # Read METASPACE output
+    # Generated at 4/17/2020 12:08:16 PM. For help see https://bit.ly/2HO2uz4
+    # URL: https://metaspace2020.eu/annotations?db=whole_body_MSMS_test_v3&prj=a493c7b8-e27f-11e8-9d75-3bb2859d3748&ds=2017-05-17_19h49m04s&fdr=0.5&sort=-mz&hideopt=1&sections=3&page=7
+
+    ms_out = pd.read_csv('metaspace_annotations.csv', header=2)
+    ms_out = ms_out[ms_out.adduct == 'M[M]+']
+    ms_out['n_ids_formula'] = ms_out.moleculeIds.apply(lambda x: len(x.split(',')))
+    gc = ['datasetId', 'formula', 'adduct', 'mz', 'fdr',
+          'moleculeNames']
+    ms_out = ms_out[gc]
+    ms_out['moleculeNames'] = ms_out['moleculeNames'].apply(lambda x: x.split(', '))
+    ms_out = split_data_frame_list(ms_out, 'moleculeNames')
+    ms_out['moleculeNames'] = ms_out['moleculeNames'].apply(lambda x: x.split('_', 2))
+    df = pd.DataFrame(ms_out['moleculeNames'].tolist(), columns=['id', 'par_frag', 'name'])
+    ms_out = pd.concat([df, ms_out, ], axis=1)
+    ms_out = ms_out.sort_values(by=['name'])
+
+    # Label with number of parents and fragments for each id
+    ms_out['parent'] = ms_out['par_frag'].apply(lambda x: a_label(x, 'p'))
+    ms_out['n_frag'] = ms_out['par_frag'].apply(lambda x: a_label(x, 'f'))
+    df = ms_out[['id', 'parent', 'n_frag']]
+    df = df.groupby('id').sum()
+    ms_out = ms_out.merge(df, on='id', how='left')
+    gc = ['id', 'par_frag', 'name', 'datasetId', 'formula',
+          'adduct', 'mz', 'fdr', 'moleculeNames',
+          'parent_y', 'n_frag_y']
+    ms_out = ms_out[gc].copy(deep=True)
+
+    # Label with number of degenerate formulas at each mass
+    df = ms_out[['id', 'formula']]
+    df = df.groupby('formula').nunique()
+    df = df.iloc[:, 0:1]
+    ms_out = ms_out.merge(df, on='formula', how='left')
+
     return
 
 

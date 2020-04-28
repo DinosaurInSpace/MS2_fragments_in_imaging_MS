@@ -29,13 +29,15 @@ def results(database, fdr=None, coloc_with=None):
         annotation_filter = coloc_coeff_filter.copy()
     else:
         coloc_coeff_filter = None
-        annotation_filter = {'database': database}
+        annotation_filter = {'database': database, 'hasHiddenAdduct': True
+
+}
         if fdr:
             annotation_filter['fdrLevel'] = fdr
 
     records = sm._gqclient.getAnnotations(
         annotationFilter=annotation_filter,
-        datasetFilter={'ids': '2017-05-17_19h49m04s'},  # Hardcoded dsid!
+        datasetFilter={'ids': '2017-05-17_19h49m04s'}  # Hardcoded dsid!
         #colocFilter=coloc_coeff_filter,
     )
     if not records:

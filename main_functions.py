@@ -28,13 +28,12 @@ The workflow will consist of the following steps:
 # Identify other missed peaks (...) ?
 
 Future:
-1. Future: HMDB spectra, lipid spectra (lipidblast?) simulated from somewhere
-2. Score colocalization
-3. Extract Mona negative hits
-4. Implement more adducts in sirius input.  Currently [M+, M+H, M+Na, M+K] next: M-H, M-
-5. Are smiles search and inchi search close enough?
-6. Search by name
-8. Rescue GNPS in silico lipids from PNNL:
+1. Score colocalization
+2. Extract Mona negative hits
+3. Implement more adducts in sirius input.  Currently [M+, M+H, M+Na, M+K] next: M-H, M-
+4. Are smiles search and inchi search close enough?
+5. Search by name
+6. Rescue GNPS in silico lipids from PNNL:
     the library membership is
     PNNL-LIPIDS-POSITIVE
     PNNL-LIPIDS-NEGATIVE
@@ -64,9 +63,14 @@ import glob
 import os
 import json
 import mona
-import subprocess
+# import subprocess
+# from subprocess import call
 from string import digits
 import re
+from shutil import copyfile
+import shlex
+from subprocess import Popen, PIPE
+from threading import Timer
 
 # RDKit
 import rdkit
@@ -430,7 +434,7 @@ def parse_hmdb(directory, theo_flag=False):
 
 def hmdb_theo_finder(ref_df, expt_df):
     # Finds theoretical MS/MS spectra only for files which do not have experimental
-    # data
+    # To delete, not used.
     pass
     return
 
@@ -453,12 +457,52 @@ def preparser_Sirius(ref_db, GNPS_hits_df, Mona_hits_df, HMDB_ex, HMDB_theo):
     # Only load predicted MS/MS spectra for samples without experimentaldata
     expt_ids = list(df1.id)
     df2 = df[~df.id.isin(expt_ids)]
-    df = pd.concat([df1, df2])
-    return df
+    df2 = df2[df2.id.isin(ht)]
+    expt_df = df1
+    theo_df = df2
+    return [df1, df2]
 
 
-def ms_format_writer(m_df, g_df, he_df, ht_df, db_index, add):
+def hmdb_spectra_copy(df, path, spectral_paths, ex_flag):
+    # parses HMDB spectra file from xml
+    if ex_flag is True:
+        from_path = '/Users/dis/Desktop/hmdb_LCMS/hmdb_experimental_msms_spectra'
+    else:
+        from_path = '/Users/dis/Desktop/hmdb_LCMS/hmdb_predicted_msms_spectra'
+
+    for file in df.file_paths:
+        f = from_path + '/' + file
+        #print(f)
+        mz_list = []
+        int_list = []
+        with open(f, 'r') as input_file:
+            lines = input_file.readlines()
+            for line in lines:
+                if '<mass-charge>' in line:
+                    mz = line.split('>')[1]
+                    mz = mz.split('<')[0]
+                    mz_list.append(float(mz))
+                elif '<intensity>' in line:
+                    i = line.split('>')[1]
+                    i = i.split('<')[0]
+                    int_list.append(float(i))
+                else:
+                    continue
+
+        out_file = path + file.split('.')[0] + '.txt'
+        spectral_paths.append(out_file)
+        mz_i_list = zip(mz_list, int_list)
+        with open(out_file, 'w+') as f:
+            for mz_i in mz_i_list:
+                to_write = str(mz_i[0]) + ' ' + str(mz_i[1]) + '\n'
+                f.write(to_write)
+
+    return spectral_paths
+
+
+def ms_format_writer(m_df, g_df, e_df, t_df, db_index, add):
     # Writes the GNPS json and the Mona text spectra to file, returning paths
+    # Copies HMDB spectra files to directory
     out_path = '/Users/dis/PycharmProjects/word2vec/spectra/'
     spectral_paths = []
     counter = 0
@@ -502,18 +546,21 @@ def ms_format_writer(m_df, g_df, he_df, ht_df, db_index, add):
     else:
         pass
 
-    if not he_df.empty:
-        # Write function to copy txt files to folder
-        pass
+    if not e_df.empty:
+        spectral_paths = hmdb_spectra_copy(e_df,
+                                           path,
+                                           spectral_paths,
+                                           True)
     else:
         pass
 
-    if not ht_df.empty:
-        # Write function to copy txt files to folder
-        pass
+    if not t_df.empty:
+        spectral_paths = hmdb_spectra_copy(t_df,
+                                           path,
+                                           spectral_paths,
+                                           False)
     else:
         pass
-
 
     return spectral_paths
 
@@ -526,103 +573,174 @@ def adduct_translate(add):
 
 
 def exists(ms_path):
-    if os.path.isfile(ms_path):
-        return 1
-    else:
+    if ms_path is None:
         return 0
+    else:
+        target = glob.glob(ms_path)
+        # print('target, 578:', target)
+        if target != []:
+            return glob.glob(ms_path)[0]
+        else:
+            return 0
 
 
-def loop_Sirius(df, Mona_hits_df, GNPS_hits_df):
+def run(cmd, timeout_sec):
+    # Timeout test
+    # https://stackoverflow.com/questions/1191374/using-module-subprocess-with-timeout
+
+    proc = Popen(shlex.split(cmd), stdout=PIPE, stderr=PIPE)
+    timer = Timer(timeout_sec, proc.kill)
+    try:
+        timer.start()
+        stdout, stderr = proc.communicate()
+
+    finally:
+        timer.cancel()
+
+    if stdout.decode("utf-8") == '':
+        return ('failed')
+
+    else:
+        return stdout.decode("utf-8")
+
+
+def loop_Sirius(df,
+                Mona_hits_df,
+                GNPS_hits_df,
+                hmdb_pos_exptl_df,
+                hmdb_pos_theo_df):
     # Main loop for running Sirius
     # Have to delete old spectra and trees before rerunning
+
     sirius_output_dict = {}
     mona_df = Mona_hits_df[['inchi', 'adduct', 'spectrum']].copy(deep=True)
     gnps_df = GNPS_hits_df[['can_smiles', 'Adduct', 'peaks_json']].copy(deep=True)
+    hex_df = hmdb_pos_exptl_df[['id', 'adduct', 'file_paths']].copy(deep=True)
+    hth_df = hmdb_pos_theo_df[['id', 'adduct', 'file_paths']].copy(deep=True)
 
     # If positive mode
     current_adducts = ['M+', 'M+H', 'M+Na', 'M+K']
     mona_df = mona_df[mona_df.adduct.isin(current_adducts)]
     gnps_df = gnps_df[gnps_df.Adduct.isin(current_adducts)]
+    hex_df = hex_df[hex_df.adduct.isin(current_adducts)]
+    hth_df = hth_df[hth_df.adduct.isin(current_adducts)]
+
 
     # Loops over dataframe
     index_list = list(df.index)
     for idx in index_list:
-        print('\n', idx)
         ser = df.loc[idx]
+        print('\n', 'series', idx, ser.db_index)
         formula = ser.formula
-        inchi = ser.inchi
-        can_smiles = ser.can_smiles
         db_index = ser.db_index
-        mo_df = mona_df[mona_df.inchi == inchi]
-        gn_df = gnps_df[gnps_df.can_smiles == can_smiles]
-        unique_adducts = list(set(list(mo_df.adduct) + list(gn_df.Adduct)))
-        print(unique_adducts)
+
+        mo_df = mona_df[mona_df.inchi == ser.inchi]
+        gn_df = gnps_df[gnps_df.can_smiles == ser.can_smiles]
+        he_df = hex_df[hex_df.id == ser.id]
+        ht_df = hth_df[hth_df.id == ser.id]
+
+        unique_adducts = list(set(list(mo_df.adduct)
+                                  + list(gn_df.Adduct)
+                                  + list(he_df.adduct)
+                                  + list(ht_df.adduct)))
+
         add_counter = 0
         for add in unique_adducts:
             print(idx, ' ', add)
             add_counter += 1
             output_dir = '/Users/dis/PycharmProjects/word2vec/trees/' + db_index
+
             m_df = mo_df[mo_df.adduct == add]
             g_df = gn_df[gn_df.Adduct == add]
-            # HMDB_df
-            # HMDB_df
-            spectra_list = ms_format_writer(m_df, g_df, db_index, add)
-            t_add = adduct_translate(add)
-            sirius_input = runner_Sirius(formula, t_add, spectra_list, output_dir, db_index)
-            # In Jupyter it was: "sirius_output = !{sirius_input}"
-            sirius_output = subprocess.check_output([sirius_input])
-            sirius_output_dict[db_index] = output_Sirius_parser(sirius_output, output_dir,
-                                                                db_index, add_counter)
+            e_df = he_df[he_df.adduct == add]
+            t_df = ht_df[ht_df.adduct == add]
 
-    sirius_output_df = pd.DataFrame.from_dict(sirius_output_dict, orient='index', columns=['file'])
+            print('m_df:', len(list(m_df.spectrum)),
+                  'g_df', len(list(g_df.peaks_json)),
+                  'e_df', len(list(e_df.file_paths)),
+                  't_df', len(list(t_df.file_paths)))
+
+            # Make copy function!
+            spectra_list = ms_format_writer(m_df,
+                                            g_df,
+                                            e_df,
+                                            t_df,
+                                            db_index,
+                                            add)
+
+            t_add = adduct_translate(add)
+            sirius_input = runner_Sirius(formula,
+                                         t_add,
+                                         spectra_list,
+                                         output_dir,
+                                         db_index)
+
+            # Run with timeout as Sirius chokes >120 mins in some large compounds
+            #sirius_output = subprocess.check_output(sirius_input)
+            sirius_input = " ".join(sirius_input)
+            sirius_output = run(sirius_input, 180)
+
+            #sirius_output = sirius_output.decode('utf-8')
+            # print('sirius_output:', '\n', sirius_output, '\n',)
+            sirius_output_dict[db_index] = output_Sirius_parser(sirius_output,
+                                                                output_dir,
+                                                                db_index,
+                                                                add_counter)
+    print('sirius_output_dict:', sirius_output_dict)
+    sirius_output_df = pd.DataFrame.from_dict(sirius_output_dict,
+                                              orient='index',
+                                              columns=['file'])
     sirius_output_df['exists'] = sirius_output_df['file'].apply(lambda x: exists(x))
-    print('Sirius success: ', sirius_output_df.exists.value_counts())
-    sirius_output_df = sirius_output_df[sirius_output_df.exists == 1]
+    # print('Sirius success: ', sirius_output_df.exists.value_counts())
+    sirius_output_df = sirius_output_df[sirius_output_df.exists != 0]
 
     return sirius_output_df
 
 
 def runner_Sirius(formula, ion, spectra_list, output_dir, db_index):
     # Generates query for Sirius and runs on command line.
+    '''
     binary = '/Users/dis/PycharmProjects/word2vec/sirius/bin/sirius'
     s = ' '
     spectra_query = ' -2 ' + s.join(spectra_list)
     query = binary + ' -f ' + formula + ' -i ' + ion + spectra_query + ' -o ' + output_dir + '/' + db_index
+    print('query: ', query, '\n', type(query))
     return query
+    '''
+
+    query_list = ['/Users/dis/PycharmProjects/word2vec/sirius/bin/sirius',
+                  '-f',
+                  formula,
+                  '-i',
+                  ion,
+                  '-2']
+    for s in spectra_list:
+        query_list.append(s)
+
+    query_list.append('-o')
+    query_list.append(output_dir + '/' + db_index)
+    #print(query_list)
+    return(query_list)
 
 
 def output_Sirius_parser(sirius_output, output_dir, db_index, n):
     # Parses Sirius output returning paths to ms file with formulas
-    idx = None
-    for line in sirius_output:
-        if 'Sirius results for' in line:
-            idx = sirius_output.index(line)
+    # print('sirius_output:', sirius_output, '\n', type(sirius_output))
 
-    if idx is None:
-        # Catch errors?
-        print('No sirius output')
-        #print(sirius_output)
+    try:
+        x = sirius_output.split("Sirius results for")[1]
+        x = x.split(".txt")[0]
+        x = x.split(": '")[1]
+        x = str(x)
+        # print('x', x)
+
+    except:
         return None
 
-    else:
-        print('ran sirius')
-        #print(sirius_output[idx:-1])
 
-        short = sirius_output[idx]
-        short = short.split('.')[0]
-        short = short.split(" '")[1]
-        idx += 1
-        first_hit = sirius_output[idx]
-        first_hit = first_hit.split('\tscore')[0]
-        first_hit = first_hit.replace('.) ', '_')
-        first_hit = first_hit.replace('\t', '_')
-        first_hit = first_hit.replace('[', '')
-        first_hit = first_hit.replace(']', '')
-        first_hit = first_hit.replace(' ', '')
-        first_hit = first_hit + '.ms'
-        search_string = output_dir + '/' + db_index +'/' + str(n) + '_' + short + '_/spectra/' + first_hit
-        #print(search_string)
-        return search_string
+    search_string = output_dir + '/' + db_index + '/' + str(n) + '_' + x + '_/spectra/*.ms'
+    # print('search_string:', search_string)
+    return search_string
 
 
 def ms_pd_reader(ms_path, db_index):
@@ -639,9 +757,15 @@ def df_merge(input_df):
 
     # Loops over dataframe
     index_list = list(input_df.index)
+    ctr = 0
     for idx in index_list:
+        ctr += 1
+        if ctr % 500 == 0:
+            print('df_merge: ', ctr)
+        else:
+            pass
         ser = input_df.loc[idx]
-        df = ms_pd_reader(ser.file, ser.db_index)
+        df = ms_pd_reader(ser.exists, ser.db_index)
         out_df = pd.concat([out_df, df])
 
     out_df = pd.merge(out_df, input_df, how='left', on='db_index')
@@ -748,8 +872,11 @@ def mass_check(em, im):
 
 def results_clean_up(has_MS2_df, sirius_output_df):
     # Merges Sirius results and metadata
-    MS2_meta_df = pd.merge(has_MS2_df, sirius_output_df, how='inner',
-                           left_on='db_index', right_index=True)
+    MS2_meta_df = pd.merge(has_MS2_df,
+                           sirius_output_df,
+                           how='inner',
+                           left_on='db_index',
+                           right_index=True)
 
     # Joins MS2 spectra to metadata
     pre_METASPACE_df = df_merge(MS2_meta_df)
@@ -761,7 +888,7 @@ def results_clean_up(has_MS2_df, sirius_output_df):
     pre_METASPACE_df = pre_METASPACE_df[pre_METASPACE_df.dmass >= 0]
     pre_METASPACE_df[['formula', 'explanation', 'exactmass', 'expl_ex', 'dmass']]
 
-    print('Observed ions: ', pre_METASPACE_df['dmass'].value_counts())
+    print('Observed ions: \n', pre_METASPACE_df['dmass'].value_counts())
 
     pre_METASPACE_df = pre_METASPACE_df.dropna()
     pre_METASPACE_df['H_check'] = pre_METASPACE_df.explanation.str.contains('H')
@@ -785,7 +912,7 @@ def results_clean_up(has_MS2_df, sirius_output_df):
                                                          x.ion_mass),
                                     axis=1)
     pre_METASPACE_df = df
-    print('Correct ionformulas: ', pre_METASPACE_df.good_mass_calc.value_counts())
+    print('Correct ionformulas: \n', pre_METASPACE_df.good_mass_calc.value_counts())
     return pre_METASPACE_df
 
 

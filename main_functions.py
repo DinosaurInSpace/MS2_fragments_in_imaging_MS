@@ -17,32 +17,42 @@ https://www.nature.com/articles/s41592-019-0344-8
 Databases of MS/MS fragments are then exported to METASPACE for searching.
 
 The workflow will consist of the following steps:
-1. Load database of ions such as core_metabolome_v3.
+
+download_reference_spectra.py:
+1. Load database of ions (e.g. core_metabolome_v3.)
 2. Search for and collect authentic standard spectra in GNPS (https://gnps.ucsd.edu/).
 3. Search for and download authentic standard spectra in MONA (https://mona.fiehnlab.ucdavis.edu/).
-4. Submit standard spectra to Sirius via command line.
-5. Collect and parse .json Sirius tree outputs to MS/MS spectra.
-6. Filter spectral database for observed ions in standard METASPACE search.
-7. Output dataset specific database to METASPACE for MS/MS ion searching.
+4. Search for and download authentic standard spectra via HMDB.
+5. Submit standard spectra to Sirius via command line.
+6. Collect and parse .json Sirius tree outputs to MS/MS spectra.
+7. Save
 
-# Identify other missed peaks (...) ?
+generate_custom_db.py:
+8. Download METASPACE search results via API.
+9. Filter spectral database for observed ions in standard METASPACE search.
+10. Output dataset specific database to METASPACE for MS/MS ion searching.
+11. Upload custom database to beta server.
 
-Future:
-1. Score colocalization
-2. Extract Mona negative hits
-3. Implement more adducts in sirius input.  Currently [M+, M+H, M+Na, M+K] next: M-H, M-
-4. Are smiles search and inchi search close enough?
-5. Search by name
-6. Rescue GNPS in silico lipids from PNNL:
-    the library membership is
-    PNNL-LIPIDS-POSITIVE
-    PNNL-LIPIDS-NEGATIVE
-    --> Need structures somehow for this!  "Few weeks" Ming
+run_metaspace_msms.py:
+12. Copy dataset to beta and search with database.
+13. Download result table with API.
+14. Download results images with API.
+15. Score results
+
+    Implement:
+    Extract Mona negative hits
+    Support negative mode data
+    Support more adducts
+        M-H, M-
+        +/-H2O?
+        What steps?
+    Score colocalization
+    Score coloc class I-IV
 
 Usage:
 
-1. Steps 1-5 need only be run when a database is changed.
-2. Steps 6-7 should be run with each experimental database.
+1. Steps 1-7 need only be run when a database is changed.
+2. Steps 8-15 should be run with each experimental database.
 3. The workflow can be run interactively from the following Jupyter notebook:
     http://localhost:8888/notebooks/PycharmProjects/word2vec/database_expt_msms_to_METASPACE.ipynb
 
@@ -63,20 +73,14 @@ import glob
 import os
 import json
 import mona
-# import subprocess
-# from subprocess import call
 from string import digits
 import re
-from shutil import copyfile
 import shlex
 from subprocess import Popen, PIPE
 from threading import Timer
 
 # RDKit
-import rdkit
 from rdkit import Chem
-from rdkit.Chem import AllChem
-
 from molmass import Formula
 
 
@@ -989,7 +993,7 @@ def extract_results_METASPACE(ms_out):
     # Generated at 4/17/2020 12:08:16 PM. For help see https://bit.ly/2HO2uz4
     # URL: https://metaspace2020.eu/annotations?db=whole_body_MSMS_test_v3&prj=a493c7b8-e27f-11e8-9d75-3bb2859d3748&ds=2017-05-17_19h49m04s&fdr=0.5&sort=-mz&hideopt=1&sections=3&page=7
 
-    ms_out = pd.read_csv('metaspace_annotations.csv', header=2)
+    #ms_out = pd.read_csv('metaspace_annotations.csv', header=2)
     ms_out = ms_out[ms_out.adduct == 'M[M]+']
     ms_out['n_ids_formula'] = ms_out.moleculeIds.apply(lambda x: len(x.split(',')))
     gc = ['datasetId', 'formula', 'adduct', 'mz', 'fdr',
@@ -1019,7 +1023,7 @@ def extract_results_METASPACE(ms_out):
     df = df.iloc[:, 0:1]
     ms_out = ms_out.merge(df, on='formula', how='left')
 
-    return
+    return ms_out
 
 
 def main():

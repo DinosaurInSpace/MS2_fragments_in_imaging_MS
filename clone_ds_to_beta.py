@@ -1,75 +1,96 @@
-import json, getpass, time
-
+import json, time, ast
 from metaspace.sm_annotation_utils import get_config, GraphQLClient
+# from metaspace.sm_annotation_utils import SMInstance
 
-email = 'x@embl.de' # Put your email address here. This assumes the same email/password on both production and staging
-password = getpass.getpass(prompt='Password: ', stream=None) # This will prompt for your password in the console
-base_dataset_id = '2019-10-30_09h15m17s' # Get this from the url in the "Annotations" page when filtering for the dataset. It should look like this: 2019-11-04_15h23m33s
+def copy_beta(ds_id_in, adducts_in, input_db):
+    # Copies dataset from production to beta, searches adducts and db.
+    # adducts = 'HNaK', 'HNaKM', 'M'
+    # input_db = 'core_metabolome_v3'
 
-prod_gql = GraphQLClient(get_config('https://metaspace2020.eu', email, password))
-beta_gql = GraphQLClient(get_config('https://beta.metaspace2020.eu', email, password))
+    #sm = SMInstance()
+    #sm
 
-result = prod_gql.query(
-    """
-    query editDatasetQuery($id: String!) {
-      dataset(id: $id) {
-        id
-        name
-        metadataJson
-        configJson
-        isPublic
-        inputPath
-        group { id }
-        submitter { id }
-        principalInvestigator { name email }
-        molDBs
-        adducts
-      }
-    }
-    """,
-    {'id': base_dataset_id}
-)
-ds = result['dataset']
-config = json.loads(ds['configJson'])
-metadata = json.loads(ds['metadataJson'])
+    f = open('/Users/dis/.metaspace.json', "r")
+    secret = (f.read())
+    secret = secret.replace('\n', '')
+    secret = ast.literal_eval(secret)
+    f.close()
 
-beta_user_id = beta_gql.query(
-    """
-    query {
-      currentUser {id}
-    }
-    """)['currentUser']['id']
+    email = secret['email']
+    password = secret['password']
+    base_dataset_id = ds_id_in # Get this from the url in the "Annotations" page when filtering for the dataset. It should look like this: 2019-11-04_15h23m33s
 
-adducts = ds['adducts']
-# Uncomment if you want to add the `[M]+`/`[M]-` adduct
-# new_adduct = '[M]+' if metadata['MS_Analysis']['Polarity'] == 'Positive' else '[M]-'
-# if new_adduct not in adducts:
-#     adducts.append(new_adduct)
-# Or alternatively, if you only want [M]+/[M]-:
-# new_adduct = '[M]+' if metadata['MS_Analysis']['Polarity'] == 'Positive' else '[M]-'
-# adducts = [new_adduct]
+    #sm.login(secret['email'], secret['password'])
 
-beta_gql.query(
-    """
-    mutation ($input: DatasetCreateInput!) {
-      createDataset(input: $input)
-    }
-    """,
-    {
-        'input': {
-            'name': ds['name'] + f" (cloned from {base_dataset_id})",
-            'inputPath': ds['inputPath'],
-            'metadataJson': ds['metadataJson'],
-            'molDBs': ['core_metabolome_v3'],
-            'adducts': adducts,
-            'submitterId': beta_user_id,
-            'principalInvestigator': ds['principalInvestigator'],
-            'isPublic': False,
-            # You can also add a project ID if you want, e.g.
-            # 'projectIds': ['d3c7dc98-013e-11ea-9e6f-b79984c7f8d4'],
+    prod_gql = GraphQLClient(get_config(host='https://metaspace2020.eu', email=email, password=password))
+    beta_gql = GraphQLClient(get_config(host='https://beta.metaspace2020.eu', email=email, password=password))
+
+    result = prod_gql.query(
+        """
+        query editDatasetQuery($id: String!) {
+          dataset(id: $id) {
+            id
+            name
+            metadataJson
+            configJson
+            isPublic
+            inputPath
+            group { id }
+            submitter { id }
+            principalInvestigator { name email }
+            molDBs
+            adducts
+          }
         }
-    }
-)
-# In case you put this in a loop to copy multiple datasets, always sleep 1 second between new datasts
-# or else METASPACE may throw an error
-time.sleep(1)
+        """,
+        {'id': base_dataset_id}
+    )
+    ds = result['dataset']
+    config = json.loads(ds['configJson'])
+    metadata = json.loads(ds['metadataJson'])
+    if ds['principalInvestigator'] and not ds['principalInvestigator'].get('email'):
+        ds['principalInvestigator']['email'] = 'some@email.address'
+
+    beta_user_id = beta_gql.query(
+        """
+        query {
+          currentUser {id}
+        }
+        """)['currentUser']['id']
+
+    if adducts_in == 'HNaK':
+        adducts = ds['adducts']
+    elif adducts_in == 'HNaKM':
+        adducts = ds['adducts']
+        new_adduct = '[M]+' if metadata['MS_Analysis']['Polarity'] == 'Positive' else '[M]-'
+        if new_adduct not in adducts:
+            adducts.append(new_adduct)
+    else:
+        new_adduct = '[M]+' if metadata['MS_Analysis']['Polarity'] == 'Positive' else '[M]-'
+        adducts = [new_adduct]
+
+    beta_gql.query(
+        """
+        mutation ($input: DatasetCreateInput!) {
+          createDataset(input: $input)
+        }
+        """,
+        {
+            'input': {
+                'name': ds['name'] + f" (cloned from {base_dataset_id})",
+                'inputPath': ds['inputPath'],
+                'metadataJson': ds['metadataJson'],
+                'molDBs': [input_db],
+                'adducts': adducts,
+                'submitterId': beta_user_id,
+                'principalInvestigator': ds['principalInvestigator'],
+                'isPublic': False,
+                # You can also add a project ID if you want, e.g.
+                # 'projectIds': ['d3c7dc98-013e-11ea-9e6f-b79984c7f8d4'],
+            }
+        }
+    )
+    # In case you put this in a loop to copy multiple datasets, always sleep 1 second between new datasts
+    # or else METASPACE may throw an error
+    return
+    time.sleep(1)

@@ -1,9 +1,11 @@
-/ALL_GNPS.json
-/mona_2020_Apr_15.pickle
-/whole_body_imaging_core_metabolome_v3_f2.tsv
-/wholebody_imaging_MS_dataset_10_region_metlin_library.csv
-/wholebody_imaging_MS_dataset_10_region_metlin_library.pickle
+/databases/ALL_GNPS.json
+/databases/mona_pos_2020_Apr_15.pickle
+/early_manual/whole_body_imaging_core_metabolome_v3_f2.tsv
+/early_manual/wholebody_imaging_MS_dataset_10_region_metlin_library.csv
+/early_manual/wholebody_imaging_MS_dataset_10_region_metlin_library.pickle
 /trees/
 /spectra/
 /sirius/
 /images_man/
+/databases/
+/databases/

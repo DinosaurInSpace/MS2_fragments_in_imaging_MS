@@ -10,7 +10,7 @@ spec.loader.exec_module(private)
 
 EMAIL = private.mona_user
 PASSWORD = private.mona_pw
-MAX_CALLS_PER_SECOND = 5
+MAX_CALLS_PER_SECOND = 1
 last_api_call = 0
 
 

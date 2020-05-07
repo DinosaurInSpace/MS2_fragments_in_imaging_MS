@@ -15,10 +15,10 @@ Four changes are needed:
 
 import pandas as pd
 from metaspace.sm_annotation_utils import SMInstance
-sm = SMInstance()
+#sm = SMInstance()
+sm = SMInstance(host='https://beta.metaspace2020.eu')
 
-
-def results(database, fdr=None, coloc_with=None):
+def results(dsid_used, database, fdr=None, coloc_with=None):
     if coloc_with:
         assert fdr
         coloc_coeff_filter = {
@@ -37,10 +37,11 @@ def results(database, fdr=None, coloc_with=None):
 
     records = sm._gqclient.getAnnotations(
         annotationFilter=annotation_filter,
-        datasetFilter={'ids': '2017-05-17_19h49m04s'}  # Hardcoded dsid!
+        datasetFilter={'ids': dsid_used}  # Hardcoded dsid!
         #colocFilter=coloc_coeff_filter,
     )
     if not records:
+        print('no ids found!')
         return pd.DataFrame()
 
     df = pd.io.json.json_normalize(records)

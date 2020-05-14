@@ -1,5 +1,5 @@
-/databases/ALL_GNPS.json
-/databases/mona_pos_2020_Apr_15.pickle
+/databases/gnps_exp_all.json
+/databases/mona_exp_positive.pickle
 /early_manual/whole_body_imaging_core_metabolome_v3_f2.tsv
 /early_manual/wholebody_imaging_MS_dataset_10_region_metlin_library.csv
 /early_manual/wholebody_imaging_MS_dataset_10_region_metlin_library.pickle

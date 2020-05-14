@@ -69,7 +69,7 @@ def copy_beta(ds_id_in, adducts_in, input_db):
         new_adduct = '[M]+' if metadata['MS_Analysis']['Polarity'] == 'Positive' else '[M]-'
         adducts = [new_adduct]
 
-    beta_gql.query(
+    result = beta_gql.query(
         """
         mutation ($input: DatasetCreateInput!) {
           createDataset(input: $input)
@@ -92,5 +92,11 @@ def copy_beta(ds_id_in, adducts_in, input_db):
     )
     # In case you put this in a loop to copy multiple datasets, always sleep 1 second between new datasts
     # or else METASPACE may throw an error
-    return
+
+    # Should print and return new dsid on betaserver
+    ds_id_out = dict(result)['createDataset']
+    ds_id_out = ds_id_out.split(":")[1].split(",")[0].replace('"', '')
+    output = {'ds_id_in': ds_id_in, 'ds_id_out': ds_id_out}
+    print(output)
+    return output
     time.sleep(1)

@@ -2,7 +2,8 @@ import json, time, ast
 from metaspace.sm_annotation_utils import get_config, GraphQLClient
 # from metaspace.sm_annotation_utils import SMInstance
 
-def copy_beta(ds_id_in, adducts_in, input_db):
+def copy_beta(ds_id_in, adducts_in, input_db, prod_to_beta=True):
+    # prod_to_beta copies data from prod to beta.  If false, beta to beta.
     # Copies dataset from production to beta, searches adducts and db.
     # adducts = 'HNaK', 'HNaKM', 'M'
     # input_db = 'core_metabolome_v3'
@@ -22,8 +23,11 @@ def copy_beta(ds_id_in, adducts_in, input_db):
 
     #sm.login(secret['email'], secret['password'])
 
-    prod_gql = GraphQLClient(get_config(host='https://metaspace2020.eu', email=email, password=password))
     beta_gql = GraphQLClient(get_config(host='https://beta.metaspace2020.eu', email=email, password=password))
+    if prod_to_beta == True:
+        prod_gql = GraphQLClient(get_config(host='https://metaspace2020.eu', email=email, password=password))
+    else:
+        prod_gql = beta_gql
 
     result = prod_gql.query(
         """

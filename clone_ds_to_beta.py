@@ -52,6 +52,10 @@ def copy_beta(ds_id_in, adducts_in, input_db, prod_to_beta=True):
     ds = result['dataset']
     config = json.loads(ds['configJson'])
     metadata = json.loads(ds['metadataJson'])
+
+    if not 'Pixel_Size' in metadata['MS_Analysis']:
+        metadata['MS_Analysis']['Pixel_Size'] = {'Xaxis': 1, 'Yaxis': 1}
+
     if ds['principalInvestigator'] and not ds['principalInvestigator'].get('email'):
         ds['principalInvestigator']['email'] = 'some@email.address'
 
@@ -83,7 +87,7 @@ def copy_beta(ds_id_in, adducts_in, input_db, prod_to_beta=True):
             'input': {
                 'name': ds['name'] + f" (cloned from {base_dataset_id})",
                 'inputPath': ds['inputPath'],
-                'metadataJson': ds['metadataJson'],
+                'metadataJson': json.dumps(metadata),
                 'molDBs': [input_db],
                 'adducts': adducts,
                 'submitterId': beta_user_id,

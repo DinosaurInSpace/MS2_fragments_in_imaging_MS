@@ -23,17 +23,11 @@ from glob import glob
 from matplotlib import pyplot as plt
 import pathlib
 from shutil import copyfile
+import pickle
 
-from results_local import results as results2
 from metaspace.sm_annotation_utils import SMInstance
 from metaspace.sm_annotation_utils import GraphQLClient
-del GraphQLClient.DEFAULT_ANNOTATION_FILTER['hasHiddenAdduct']
-sm = SMInstance(host='https://beta.metaspace2020.eu')
-sm
 
-import types
-# Assign external function as method to object
-sm.results2 = types.MethodType(results2, sm)
 
 
 __author__ = "Christopher M Baxter Rath"
@@ -46,16 +40,15 @@ __email__ = "chrisrath@gmail.com"
 __status__ = "Development"
 
 
-def logon_metaspace(path_to_pw='/Users/dis/.metaspace.json'):
+def logon_metaspace(sm, path_to_pw='/Users/dis/.metaspace.json'):
     # Logs onto METASPACE server secretly
-    f = open('/Users/dis/.metaspace.json', "r")
-    secret = (f.read())
-    secret = secret.replace('\n', '')
+    f = open(path_to_pw, "r")
+    secret = (f.read()).replace('\n', '')
     secret = ast.literal_eval(secret)
     f.close()
 
     sm.login(secret['email'], secret['password'])
-    return
+    return sm
 
 
 def split_data_frame_list(df, target_column):
@@ -98,16 +91,14 @@ def a_label(x, a):
         return 0
 
 
-def extract_results_METASPACE(ms_out):
-    # Read METASPACE output
-    ms_out = pd.read_csv(ms_out, header=2)
+def extract_results_metaspace(ds_id, ms_out):
+    # Read METASPACE output from API
 
-    ms_out = ms_out[(ms_out.adduct == 'M[M]+')|(ms_out.adduct == 'M[M]-')]
-    ms_out['n_ids_formula'] = ms_out.moleculeIds.apply(lambda x: len(x.split(',')))
-    gc = ['datasetId', 'formula', 'adduct', 'mz', 'fdr',
-          'moleculeNames']
+    ms_out = ms_out[(ms_out.adduct == '[M]+')|(ms_out.adduct == '[M]-')]
+    ms_out['n_ids_formula'] = ms_out.moleculeIds.apply(lambda x: len(x))
+    gc = ['formula', 'adduct', 'mz', 'fdr', 'moleculeNames']
     ms_out = ms_out[gc]
-    ms_out['moleculeNames'] = ms_out['moleculeNames'].apply(lambda x: x.split(', '))
+    ms_out['ds_id'] = ds_id
     ms_out = split_data_frame_list(ms_out, 'moleculeNames')
     ms_out['moleculeNames'] = ms_out['moleculeNames'].apply(lambda x: x.split('_', 2))
     df = pd.DataFrame(ms_out['moleculeNames'].tolist(), columns=['id', 'par_frag', 'name'])
@@ -120,8 +111,8 @@ def extract_results_METASPACE(ms_out):
     df = ms_out[['id', 'parent', 'n_frag']]
     df = df.groupby('id').sum()
     ms_out = ms_out.merge(df, on='id', how='left')
-    gc = ['id', 'par_frag', 'name', 'datasetId', 'formula',
-          'adduct', 'mz', 'fdr', 'moleculeNames',
+    gc = ['id', 'par_frag', 'name', 'ds_id', 'formula',
+          'adduct', 'mz', 'fdr',
           'parent_y', 'n_frag_y']
     ms_out = ms_out[gc].copy(deep=True)
 
@@ -130,36 +121,9 @@ def extract_results_METASPACE(ms_out):
     df = df.groupby('formula').nunique()
     df = df.iloc[:, 0:1]
     ms_out = ms_out.merge(df, on='formula', how='left')
+    ms_out = ms_out.iloc[:,0:10]
 
     return ms_out
-
-
-
-def process_manual_metaspace_report_dl(beta_id, prod_id, outpath):
-    print(beta_id)
-    target = 'any_results/metaspace_report/' + beta_id + '.csv'
-    fh = glob.glob(target)
-    print(fh)
-    ms_out = pd.read_csv(fh[0], header=2)
-    print(ms_out.shape)
-    ms_out2 = extract_results_METASPACE(ms_out)
-    print(ms_out2.shape)
-    outpath = outpath + prod_id + '_msms_report.csv'
-    ms_out2.to_csv(outpath)
-    print(outpath)
-    return outpath
-
-
-def filter_report_parent_wfragment(report, outpath):
-    # Filters METASAPCE MSMS output for 1) parent observed and 2) 1+ fragment obs.
-    df = pd.read_csv(report)
-    df = df[(df.parent_y == 1) & (df.n_frag_y > 0)]
-    ds_name = report.split('/')[-1]
-    ds_name = ds_name.split('.')[0]
-    outpath = outpath + ds_name + '.csv'
-    df.to_csv(outpath)
-    print(outpath)
-    return outpath
 
 
 def metaspace_hotspot_removal(img):
@@ -168,12 +132,13 @@ def metaspace_hotspot_removal(img):
     return np.clip(img, 0, hot_thresold) / hot_thresold
 
 
-def dl_img(main_id, beta_id, db, fdr_max, save_img):
-    # Load and save dataset as image or arrays (saved as df)
-    ds = sm.dataset(id=beta_id)
-    print(ds)
-
-    # Generate and save images
+def dl_img(ds,
+           primary_id,
+           db,
+           fdr_max,
+           out_path,
+           save_img=True):
+    # Generate and save images from METASPACE to local by formula
     x = ds.all_annotation_images(fdr=fdr_max,
                                  database=db,
                                  only_first_isotope=True,
@@ -182,57 +147,49 @@ def dl_img(main_id, beta_id, db, fdr_max, save_img):
     if x == []:
         return 'Error, empty annotations!'
     else:
+        imgs = {}
         for n in x:
+            pathlib.Path(out_path).mkdir(parents=True, exist_ok=True)
+            image = metaspace_hotspot_removal(n._images[0])
             if save_img == True:
-                image = metaspace_hotspot_removal(n._images[0])
-                plt.imshow(image)
-                pathlib.Path('formula/' + main_id + '/').mkdir(parents=True, exist_ok=True)
-                img_name = 'formula/' + main_id + '/' + n.formula + '.png'
-                plt.imsave(img_name, image)
+                out_name = out_path + n.formula + '.png'
+                plt.imsave(out_name, image)
             else:
                 # For saving arrays as df per Theo's request
-                df = pd.DataFrame(data=metaspace_hotspot_removal(n._images[0]))
-                pathlib.Path('any_results/formula_arr/' + main_id + '/').mkdir(parents=True, exist_ok=True)
-                arr_name = 'any_results/formula_arr/' + main_id + '/' + n.formula + '.txt'
-                df.to_pickle(arr_name)
-    return 1
+                out_name = out_path + n.formula + '.pickle'
+                with open(out_name, 'wb') as f:
+                    pickle.dump(image, f)
+            imgs[n.formula] = out_name
+    return imgs
 
 
-def copy_by_parent(new_id, report, img_true):
-    ms_out = pd.read_csv(report)
-    print(new_id)
+def copy_by_parent(img_dict, new_id, report, out_path, save_image=True):
+    # Organizes images by formula into folder by parent id
+
+    ms_out = pd.read_pickle(report)
+    if save_image == True:
+        extension = '.png'
+    else:
+        extension = '.pickle'
 
     # iterate through ms_out, find img by formula, save in folder by id
     max_rows = ms_out.shape[0]
     counter = 0
     while counter < max_rows:
         ser = ms_out.iloc[counter, :]
-        form = ser.formula
-        par_id = ser.id_x
-        name = ser.moleculeNames.join('_')
-        ion_type = ser.par_frag
 
-        if ion_type.find('p') != -1:
+        if ser.par_frag.find('p') != -1:
             out_ion = '_P'
-        elif ion_type.find('f') != -1:
+        elif ser.par_frag.find('f') != -1:
             out_ion = '_F'
         else:
             print('unknown ion type!')
 
-        # Man edit line below for out path!
-        outpath = 'any_results/by_id2_arr/' + new_id + '/' + par_id + '/'
-        pathlib.Path(outpath).mkdir(parents=True, exist_ok=True)
+        out_by_id = out_path + new_id + '/by_id/' + ser.id_x + '/'
+        pathlib.Path(out_by_id).mkdir(parents=True, exist_ok=True)
 
-        if img_true == True:
-            infile = glob.glob('any_results/formula/' +
-                               new_id + '/' + form + '.png')[0]
-            outfile = outpath + form + out_ion + '.png'
-
-        else:
-            infile = glob.glob('any_results/formula_arr/' +
-                               new_id + '/' + form + '.txt')[0]
-            outfile = outpath + form + out_ion + '.txt'
-
+        infile = img_dict[report][ser.formula]
+        outfile = out_by_id + ser.formula + out_ion + extension
         # print(infile, '\n', outfile)
         copyfile(infile, outfile)
         counter += 1
@@ -240,24 +197,42 @@ def copy_by_parent(new_id, report, img_true):
     return 1
 
 
-def reporting_loop(input_ds_id, output_ds_id):
-    # Call all the fun stuff above!
+def reporting_loop(ori_ds_id,
+                   db_id,
+                   msms_ds_id,
+                   out_path,
+                   parent_and_fragment_req=True,
+                   fdr_max=0.5,
+                   save_image=True):
+    # Access server and logon!
+    sm = SMInstance(host='https://beta.metaspace2020.eu')
+    sm = logon_metaspace(sm)
+
+    # Accesses results with target db and parses
+    ds = sm.dataset(id=msms_ds_id)
+    results_df = ds.results(database=db_id).reset_index()
+    results_df = extract_results_metaspace(msms_ds_id, results_df)
+
+    if parent_and_fragment_req == True:
+        results_df = results_df[(results_df.parent_y == 1) &
+                                (results_df.n_frag_y > 0)]
+
+    pathlib.Path(out_path + msms_ds_id + '/').mkdir(parents=True, exist_ok=True)
+    out_df = out_path + msms_ds_id + '/' + "ms2_" + msms_ds_id + "_db_" + db_id + "_ms1_" + ori_ds_id + '.pickle'
+    results_df.to_pickle(out_df)
 
     # Loop to download images from METASPACE for datasets
-    # Last arguement False == arrays, True = images
-    dl_img(input_ds_id,
-           output_ds_id,
-           'any_ds_db_msms_2020_Apr_28',
-           0.5,
-           False)
+    img_dict = {}
+    img_dict[out_df] = dl_img(ds,
+                              msms_ds_id,
+                              db_id,
+                              fdr_max,
+                              out_path + msms_ds_id + '/by_formula/',
+                              save_image)
 
     # Loop to group ion images or arrays by formula into by parent id
-    msms_reports = glob.glob('any_results/msms_theo_man_report/*.csv')
-    # msms_reports = glob.glob('any_results/msms_report/*.csv')
-    for report in msms_reports:
-        new_id = report.split('/')[-1]
-        new_id = new_id.split('_msms_')[0]
-        copy_by_parent(new_id, report, False)
+    copy_by_parent(img_dict, msms_ds_id, out_df, out_path, save_image)
+
     return
 
 

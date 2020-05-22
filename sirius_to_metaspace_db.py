@@ -47,7 +47,6 @@ def df_merge(input_df):
         ser = input_df.loc[idx]
         df = ms_pd_reader(ser.exists, ser.db_index)
         out_df = pd.concat([out_df, df])
-
     out_df = pd.merge(out_df, input_df, how='left', on='db_index')
     return out_df
 
@@ -156,6 +155,9 @@ def mass_check(em, im):
 
 
 def results_clean_up(has_ms2_df, sirius_output_df, polarity):
+    # Empty!  columns = [exits, source, polarity]
+    print(2, 'sirius_output_df', sirius_output_df.shape, sirius_output_df)
+
     # Merges Sirius results and metadata
     ms2_meta_df = pd.merge(has_ms2_df,
                            sirius_output_df,
@@ -164,7 +166,7 @@ def results_clean_up(has_ms2_df, sirius_output_df, polarity):
                            right_index=True)
 
     # Joins MS2 spectra to metadata
-    print('1', ms2_meta_df.shape)
+    print('10', ms2_meta_df.shape)
     df = df_merge(ms2_meta_df)
     df = df.dropna()
     df['expl_ex'] = df.explanation.apply(lambda x: ex(x))
@@ -267,6 +269,9 @@ def primary_loop(limit_list,
                         theo_negative,
                         theo_positive], sort=True
                        )
+    if out_df.empty:
+        print('DataFrame is empty!')
+
     out_df = out_df[['exists', 'source', 'polarity']].copy(deep=True)
     out_df = out_df[out_df.polarity == polarity]
 

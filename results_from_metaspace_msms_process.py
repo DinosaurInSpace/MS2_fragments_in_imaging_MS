@@ -1,16 +1,9 @@
 #!/usr/bin/env python
 
 """
-To write!
-
 To-do:
-1) Make sure it works.
-2) Check that the download results works.
-3) Replace many static variables.
-4) Check downloading of images files works.
-5) Any other df stuff parsing needed?
-6) Implement proposed scoring function
-
+1) Replace many static variables.
+2) Fix main function at end
 
 """
 
@@ -212,6 +205,7 @@ def reporting_loop(ori_ds_id,
     ds = sm.dataset(id=msms_ds_id)
     results_df = ds.results(database=db_id).reset_index()
     results_df = extract_results_metaspace(msms_ds_id, results_df)
+
 
     if parent_and_fragment_req == True:
         results_df = results_df[(results_df.parent_y == 1) &

@@ -35,44 +35,6 @@ def get_ds_results():
 
 # get_ds_results()
 #%%
-feature_annotations_df: pd.DataFrame = None
-features_per_parent_s: pd.Series = None
-mol_id_to_name_s: pd.Series = None
-
-def make_base_dfs_old():
-    global feature_annotations_df, features_per_parent_s, parents_df, mol_id_to_name_s
-    # Reconstruct fragments from mol names. It would be better to get this from source data,
-    # but I don't have it and I need some data to demo/test this
-    feature_annotations = []
-    PARSE_MOL_ID = re.compile(r'([^_]+)_(\d+)([pf])')
-    for ion_formula, mol_ids in ds_results[['ionFormula', 'moleculeIds']].itertuples(False, None):
-        for mol_id in mol_ids:
-            parent_id, n, pf = PARSE_MOL_ID.match(mol_id).groups()
-            feature_annotations.append((parent_id, int(n), pf == 'p', ion_formula))
-    feature_annotations_df = pd.DataFrame(
-        feature_annotations, columns=['parent_id', 'feature_n', 'is_parent', 'ion_formula']
-    )
-    features_per_parent_s = feature_annotations_df.groupby('parent_id').feature_n.max().rename('parent_num_features')
-    feature_annotations_df = feature_annotations_df.merge(features_per_parent_s, left_on='parent_id', right_index=True)
-
-    parents_df = feature_annotations_df[lambda df: df.is_parent].set_index('parent_id')
-    assert (parents_df.feature_n == parents_df.parent_num_features).all(), "Sanity check. \"Fragments\" larger than the parent could happen with dimerization, but it's not expected with the source data"
-    missing_parents = set(feature_annotations_df.parent_id) - set(parents_df.index)
-    if missing_parents:
-        print(f"Excluding mols with no parent annotations ({len(missing_parents)}: {sorted(missing_parents)}")
-        feature_annotations_df = feature_annotations_df[lambda df: df.parent_id.isin(parents_df.index)]
-
-    feature_annotations_df = feature_annotations_df.sort_values(['parent_id', 'feature_n']).reset_index(drop=True)
-
-    # Make mapping of molecule IDs to molecule names
-    mol_id_to_name = {}
-    for mol_ids, mol_names in ds_results[['moleculeIds', 'moleculeNames']].itertuples(False, None):
-        for mol_id, mol_name in zip(mol_ids, mol_names):
-            mol_id_to_name[re.sub(r'_.*', '', mol_id)] = mol_name[len(mol_id) + 1:]
-    mol_id_to_name_s = pd.Series(mol_id_to_name, name='mol_name')
-
-# make_base_dfs()
-#%%
 fragments_df: pd.DataFrame = None
 
 def make_fragments_df():

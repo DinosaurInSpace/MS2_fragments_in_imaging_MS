@@ -28,7 +28,7 @@ ds_results: pd.DataFrame = None
 def get_ds_results():
     global ds_id, sm_ds, db_id, ds_name, ds_results
     sm_ds = sm.dataset(id=ds_id)
-    db_id = [db for db in sm_ds.databases if re.match(r'^\d', db)][0]
+    db_id = [db for db in sm_ds.databases if re.match(r'^\d|^ls_cm3_msms_all_', db)][0]
     ds_name = re.sub('[\W ]+', '_', sm_ds.name)
     ds_results = sm_ds.results(database=db_id)
 
@@ -356,15 +356,24 @@ whole_body_ds_ids = [
 ]
 
 spotting_ds_ids = [
-    '2020-05-14_16h32m01s',
-    '2020-05-14_16h32m04s',
-    '2020-05-14_16h32m07s',
-    '2020-05-14_16h32m10s',
-    '2020-05-14_16h32m14s',
-    '2020-05-14_16h32m16s',
-    '2020-05-14_16h32m19s',
-    '2020-05-14_16h32m22s',
-    '2020-05-14_16h32m26s',
+    # '2020-05-14_16h32m01s',
+    # '2020-05-14_16h32m04s',
+    # '2020-05-14_16h32m07s',
+    # '2020-05-14_16h32m10s',
+    # '2020-05-14_16h32m14s',
+    # '2020-05-14_16h32m16s',
+    # '2020-05-14_16h32m19s',
+    # '2020-05-14_16h32m22s',
+    # '2020-05-14_16h32m26s',
+    '2020-06-19_16h38m19s',
+    '2020-06-19_16h39m01s',
+    '2020-06-19_16h39m02s',
+    '2020-06-19_16h39m04s',
+    '2020-06-19_16h39m06s',
+    '2020-06-19_16h39m08s',
+    '2020-06-19_16h39m10s',
+    '2020-06-19_16h39m12s',
+    '2020-06-19_16h39m14s',
 ]
 
 high_quality_ds_ids = [

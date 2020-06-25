@@ -79,7 +79,7 @@ def find_top_10_frags(df):
         df = df.iloc[0:10, :].copy(deep=True)
     else:
         df = df.iloc[0:df.shape[0], :].copy(deep=True)
-    df['out'] = df['id_x'] + "_" + df['par_frag'] + "_" + df['formula'] + 'n' + df['n']
+    df['out'] = df['id_x'] + "_" + df['par_frag'] + "_" + df['formula'] + '_' + df['n'].astype(str)
 
     return list(df.out)
 
@@ -186,7 +186,6 @@ def generate_results(filter_df, scored_df):
         print(counter)
         # Filter level results
         f = filter_df.iloc[counter, :]
-        counter += 1
         df = filter_me(scored_df, f)
         f_dict = score_filtered(dict(f), df)
         out_list.append(f_dict)
@@ -194,6 +193,7 @@ def generate_results(filter_df, scored_df):
         # Annotated vectors
         vect = generate_vector(df, counter)
         vect_list.append(vect)
+        counter += 1
 
     return out_list, vect_list
 

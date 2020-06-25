@@ -216,8 +216,8 @@ def preparser_Sirius(ref_db, GNPS_df, Mona_df, HMDB_ex, HMDB_theo):
               df.id.isin(list(HMDB_ex.id)))].copy(deep=True)
 
     # Only load predicted MS/MS spectra for samples without experimental data
-    df2 = df[~df.id.isin(list(df1.id))]
-    df2 = df2[df2.id.isin(list(HMDB_theo.id))]
+    #df2 = df[~df.id.isin(list(df1.id))] # Return all theoretical for this exercise!!!
+    df2 = df[df.id.isin(list(HMDB_theo.id))]
 
     # Return experimental and theoretical ids
     return [df1, df2]
